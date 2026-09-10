@@ -9,6 +9,7 @@
 | 插件 | 说明 |
 |------|------|
 | [index-tts-plugin](./index-tts-plugin/) | **IndexTTS-2 语音朗读**：在每条 agent 回复末尾加喇叭按钮，把回复正文（text 块，不含思考/工具）用优云智算 IndexTTS-2 API 合成语音并朗读；含文本过滤、渐增分段、并发流水线、段间预载、浏览器音频缓存、音色源文件存档与过期自动续期。 |
+| [volc-search-plugin](./volc-search-plugin/) | **火山引擎（豆包）联网搜索**：复用 byted-web-search 技能 Python CLI（经宿主 `subprocess` 执行），注册模型工具 `byted_web_search` 与 `ctx.web` 搜索 Provider（id=`volcengine`），替代默认的 DeepSeek 联网搜索；含设置页（API Key / 默认参数 / 测试搜索）。 |
 
 ## 快速开始
 
@@ -27,9 +28,17 @@ DSH 动态插件通过 agent 会话内的 `cordis_define` / `cordis_run` 加载�
 ├── LICENSE                 Apache-2.0
 ├── README.md               本文件
 ├── agents.md               仓库级 Agent 开发与维护手册
-└── index-tts-plugin/       IndexTTS-2 语音朗读插件
-    ├── host.js             code.host 源码（配置存储）
-    ├── client.js           code.client 源码（全部功能）
+├── docs/                   跨插件共享的运行时调研文档（开发前先看）
+│   ├── README.md           文档索引
+│   └── dynamic-plugin-host-sandbox.md   动态插件 Host 沙箱能力全解
+├── index-tts-plugin/       IndexTTS-2 语音朗读插件
+│   ├── host.js             code.host 源码（配置存储）
+│   ├── client.js           code.client 源码（全部功能）
+│   ├── README.md           用户功能说明
+│   └── agents.md           插件级开发维护手册
+└── volc-search-plugin/     火山引擎（豆包）联网搜索插件
+    ├── host.js             code.host 源码（subprocess 调 CLI + 注册工具/Provider）
+    ├── client.js           code.client 源码（设置页）
     ├── README.md           用户功能说明
     └── agents.md           插件级开发维护手册
 ```
@@ -38,6 +47,7 @@ DSH 动态插件通过 agent 会话内的 `cordis_define` / `cordis_run` 加载�
 
 - 仓库根 `README.md`：项目总览。
 - 仓库根 `agents.md`：面向后续接手开发/维护的 agent 的仓库级约定。
+- `docs/`：**跨插件共享的运行时调研结论**（如动态插件 Host 沙箱能力、网络访问路径、凭证陷阱），写 `code.host` 前先读。
 - 每个插件目录：`README.md`（用户视角）+ `agents.md`（agent/开发者视角）。
 - 各插件的 code review 记录（`CODE_REVIEW.md`）为本地开发文档，按 `.gitignore` 约定一律不入库。
 

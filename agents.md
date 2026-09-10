@@ -18,6 +18,9 @@ DeepSeek Harness（DSH，基于 Cordis 的 agent harness / Web GUI）的自用�
 ├── LICENSE                 Apache-2.0
 ├── README.md               用户视角：项目总览、插件列表、快速开始
 ├── agents.md               本文档：仓库级开发/维护约定
+├── docs/                   跨插件共享的运行时调研文档（写 code.host 前先看）
+│   ├── README.md           文档索引
+│   └── dynamic-plugin-host-sandbox.md   动态插件 Host 沙箱能力全解（可用全局/ctx 规则/禁用 API/网络路径/凭证陷阱）
 └── <plugin>/
     ├── host.js             code.host 源码（函数体片段，非完整模块）
     ├── client.js           code.client 源码（函数体片段，非完整模块）
@@ -30,6 +33,7 @@ DeepSeek Harness（DSH，基于 Cordis 的 agent harness / Web GUI）的自用�
 - 每个插件目录内至少包含 `host.js` / `client.js` / `README.md` / `agents.md` 四个文件。
 - 插件级 `agents.md` 是动该插件代码前必读的交接文档（包含运行环境硬约束、核心模块、测试清单、变更流程）。
 - **`CODE_REVIEW.md` 是本地开发文档，由根 `.gitignore` 忽略，永远不要 `git add` 它。**
+- **`docs/` 存跨插件共享的运行时调研结论**（如 Host 沙箱能力、网络访问路径、凭证传递陷阱）。写 `code.host` 前先读 `docs/dynamic-plugin-host-sandbox.md`；有新环境发现先沉淀到这里，而不是只写进单插件 `agents.md`。
 
 ---
 
