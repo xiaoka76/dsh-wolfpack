@@ -10,13 +10,13 @@
 
 ## 0 外部依赖
 
-本插件**不依赖 Python / requests / 任何需要安装的运行时**：
+本插件**零外部依赖，完全依赖 DSH 自身运行**：
 
-- 动态插件 Host 沙箱没有 `fetch`，无法直接 POST API；
-- 插件通过宿主 `ctx.subprocess` 拉起**操作系统自带的 `curl`**（Windows 10+ / macOS / Linux 均自带）直连火山引擎搜索 API；
-- 请求 JSON body 经 curl stdin（`--data-binary @-`）传入，响应直接解析结构化 JSON。
+- 动态插件 Host 沙箱没有 `fetch`，`ctx.web.fetch` 只支持 `{url}` 无法自定义 method/headers/body，不能直接 POST API；
+- 插件通过宿主 `ctx.subprocess` 拉起 **DSH 自身所在的 Node 运行时**（`resolveExecutable('node')`），用 Node 内置 `https` 模块直连火山引擎搜索 API —— Node 是 DSH 的运行基础，必然存在，且自带 OpenSSL（不受本机 curl 的 TLS/schannel 问题影响）；
+- 请求 JSON body 经 stdin 传入，响应直接解析结构化 JSON。
 
-唯一的软性要求是**系统里有 `curl`**（现代桌面 OS 默认自带），以及一个火山引擎联网搜索 API Key。
+唯一需要的是**一个火山引擎联网搜索 API Key**（在「设置 → 火山引擎搜索」填写）。
 
 ## 配置
 

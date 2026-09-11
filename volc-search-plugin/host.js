@@ -9,13 +9,14 @@
  *      后，内置 `web_search` 工具也走火山引擎。
  *   3. RPC（get-config / set-config / test-search）：设置页读写 API Key 与默认参数。
  *
- * 0 外部依赖（核心决策）：
+ * 依赖 DSH 自身运行（核心决策，不依赖系统 curl）：
  *   - 动态插件 Host 沙箱**没有 fetch**（被 trap 并提示走 ctx.web），无法直接 POST
- *     Volcengine API；
- *   - 本实现**不依赖 Python / requests / 任何需安装的运行时**，而是通过宿主
- *     `ctx.subprocess` 拉起**操作系统自带的 curl**（Windows 10+ / macOS / Linux 均自带）
- *     直接 POST 火山引擎联网搜索 API；
- *   - 请求 JSON body 经 stdin（`--data-binary @-`）传入，避免命令行转义问题；
+ *     Volcengine API；`ctx.web.fetch` 只支持 `{url}`，不能自定义 method/headers/body；
+ *   - 本实现**不依赖系统 curl / Python / 任何需安装的外部工具**，而是通过宿主
+ *     `ctx.subprocess` 拉起 **DSH 自身所在的 Node 运行时**（`resolveExecutable('node')`），
+ *     用 Node 内置 `https` 模块直接 POST 火山引擎联网搜索 API。Node 是 DSH 的运行基础，
+ *     必然存在，且自带 OpenSSL，不受本机 curl 的 TLS/schannel 问题影响；
+ *   - 请求 JSON body 经 stdin 传入（与原先 `--data-binary @-` 等价），避免命令行转义；
  *   - 响应是结构化 JSON（`ResponseMetadata` + `Result.WebResults/ImageResults`），
  *     直接解析，无需文本再解析。
  *
@@ -45,6 +46,53 @@ return {
     const API_URL = 'https://open.feedcoopapi.com/search_api/web_search'
     const TRAFFIC_TAG = 'skill_web_search_common'
 
+    // ── 内联 Node 脚本：由 DSH 自身所在的 Node 运行时执行，替代系统 curl ──
+    // 行为与原先 curl 对齐：任何 HTTP 响应（含 4xx/5xx）都写 body 到 stdout 并以 0 退出，
+    // 由插件解析 JSON 判断业务错误；只有传输层错误（DNS/连接/TLS/超时）才非 0 退出。
+    // 该脚本运行在独立 node 子进程里，`require/process/Buffer` 均可用（不受宿主沙箱限制）。
+    const NODE_SCRIPT = `
+const https = require('https')
+const API_URL = ${JSON.stringify(API_URL)}
+const TRAFFIC_TAG = ${JSON.stringify(TRAFFIC_TAG)}
+let body = ''
+process.stdin.setEncoding('utf8')
+process.stdin.on('data', function (c) { body += c })
+process.stdin.on('end', function () {
+  const url = new URL(API_URL)
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Traffic-Tag': TRAFFIC_TAG,
+    'Content-Length': String(Buffer.byteLength(body)),
+  }
+  const key = (process.env.VOLC_API_KEY || '').trim()
+  if (key) headers['Authorization'] = 'Bearer ' + key
+  const req = https.request({
+    hostname: url.hostname,
+    path: url.pathname + url.search,
+    method: 'POST',
+    headers: headers,
+    timeout: 25000,
+  }, function (res) {
+    const chunks = []
+    res.on('data', function (c) { chunks.push(c) })
+    res.on('end', function () {
+      const out = Buffer.concat(chunks).toString('utf8')
+      process.stdout.write(out, function () { process.exit(0) })
+    })
+    res.on('error', function (e) {
+      process.stderr.write('response error: ' + String((e && e.message) || e))
+      process.exit(1)
+    })
+  })
+  req.on('timeout', function () { req.destroy(new Error('timeout')) })
+  req.on('error', function (e) {
+    process.stderr.write(String((e && e.message) || e))
+    process.exit(1)
+  })
+  req.end(body)
+})
+`
+
     // ── 构造请求 body（对照技能 CLI build_body）──
     // opts: { count?, type?, timeRange?, authLevel?, queryRewrite?, apiKey? }
     function buildBody(query, opts) {
@@ -66,24 +114,31 @@ return {
       return body
     }
 
-    // ── 核心：curl 直连火山引擎搜索 API，返回解析后的 JSON ──
+    // ── Node 可执行文件：DSH 自身运行在 Node 上，用它替代系统 curl（解析结果缓存）──
+    let nodeExePromise
+    function resolveNode() {
+      if (!nodeExePromise) {
+        nodeExePromise = ctx.subprocess.resolveExecutable('node').catch(function (e) {
+          nodeExePromise = undefined // 允许下次重试
+          throw new Error('找不到 Node 运行时（DSH 依赖 Node 运行，应必然存在）：' + String((e && e.message) || e))
+        })
+      }
+      return nodeExePromise
+    }
+
+    // ── 核心：DSH Node 运行时直连火山引擎搜索 API，返回解析后的 JSON ──
     async function search(query, opts) {
       const q = String(query == null ? '' : query).trim()
       if (!q) throw new Error('搜索词不能为空')
       const apiKey = String(opts && opts.apiKey != null ? opts.apiKey : state.apiKey).trim()
       const bodyText = JSON.stringify(buildBody(q, opts))
+      const nodeExe = await resolveNode()
 
-      const argv = [
-        'curl', '-s', '-S', '-X', 'POST', API_URL,
-        '-H', 'Content-Type: application/json',
-        '-H', 'X-Traffic-Tag: ' + TRAFFIC_TAG,
-      ]
-      if (apiKey) argv.push('-H', 'Authorization: Bearer ' + apiKey)
-      argv.push('--data-binary', '@-', '--max-time', '25')
-
+      // env 显式条目在 subprocess 的敏感变量 scrub 之后合并，`VOLC_API_KEY` 能存活传给子进程
       const handle = ctx.subprocess.spawn({
-        argv,
+        argv: [nodeExe, '-e', NODE_SCRIPT],
         cwd: '.',
+        env: { VOLC_API_KEY: apiKey },
         stdio: {
           stdin: { data: bodyText },
           stdout: { maxBytes: 500000 },
@@ -95,7 +150,7 @@ return {
       const out = handle.collected.stdout ? handle.collected.stdout.readFrom(0).text : ''
       const err = handle.collected.stderr ? handle.collected.stderr.readFrom(0).text : ''
       if (outcome.exitCode !== 0) {
-        throw new Error('curl 请求失败 (exit ' + String(outcome.exitCode) + '): ' + ((err || out) || '未知错误').trim())
+        throw new Error('DSH Node 请求失败 (exit ' + String(outcome.exitCode) + '): ' + ((err || out) || '未知错误').trim())
       }
 
       let data

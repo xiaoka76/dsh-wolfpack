@@ -4,11 +4,11 @@
  * 功能：
  *   1. 设置页（settings.section「火山引擎搜索」）：API Key、默认参数
  *      （条数 / 时间范围 / 权威级别 / 查询改写），以及「测试搜索」按钮
- *      （走 host.call('test-search') → Host 用系统自带 curl 直连 API）。
+ *      （走 host.call('test-search') → Host 用 DSH 自身 Node 运行时直连 API）。
  *
  * 说明：
  *   - 所有配置经 host.call('get-config' / 'set-config') 读写 Host 内存 state；
- *   - 实际搜索在 Host 通过 ctx.subprocess 执行（浏览器端不做网络调用）；
+ *   - 实际搜索在 Host 通过 ctx.subprocess 拉起 DSH 的 Node 运行时执行（浏览器端不做网络调用）；
  *   - 搜索工具 `byted_web_search` 由 Host 半部注册，本半部只负责设置 UI。
  *
  * 加载方式：作为 cordis_define 的 code.client 参数内容（async 函数体，return 插件对象）。

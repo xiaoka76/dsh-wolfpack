@@ -7,7 +7,7 @@
 
 ## 1. 项目一句话
 
-DeepSeek Harness Web GUI 上的**动态 Cordis 插件**：通过宿主 `ctx.subprocess` 拉起**操作系统自带 curl** 直连**火山引擎联网搜索** API（0 外部依赖，不需要 Python），注册模型工具 `byted_web_search` 与 `ctx.web` 搜索 Provider（id=`volcengine`），并提供设置页配置 API Key 与默认参数。
+DeepSeek Harness Web GUI 上的**动态 Cordis 插件**：通过宿主 `ctx.subprocess` 拉起 **DSH 自身所在的 Node 运行时**（`resolveExecutable('node')` + 内联 `-e` 脚本，用 Node 内置 `https` 模块）直连**火山引擎联网搜索** API（0 外部依赖，不需要 curl / Python），注册模型工具 `byted_web_search` 与 `ctx.web` 搜索 Provider（id=`volcengine`），并提供设置页配置 API Key 与默认参数。
 
 ---
 
@@ -25,15 +25,16 @@ DeepSeek Harness Web GUI 上的**动态 Cordis 插件**：通过宿主 `ctx.subp
 │ harness.handle → get-config / set-config / test-search         │
 │ harness.defineTool → byted_web_search（模型工具）              │
 │ ctx.web.registerSearchProvider({ id:'volcengine', ... })       │
-│ ctx.subprocess.spawn(curl POST open.feedcoopapi.com/...)       │
+│ ctx.subprocess.spawn(node -e <内联脚本> POST open.feedcoopapi.com/...) │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 **关键决策（不要轻易推翻）**：
-- 动态 Host 沙箱**无 `fetch`**，网络访问的唯一途径是 `ctx.subprocess` 拉起外部进程。
-- **0 外部依赖**：外部进程用**操作系统自带 curl**（Windows 10+ `C:\WINDOWS\System32\curl.exe` / macOS / Linux 均自带），不依赖 Python / requests。
+- 动态 Host 沙箱**无 `fetch`**（`ctx.web.fetch` 只支持 `{url}`），网络访问的唯一途径是 `ctx.subprocess` 拉起外部进程。
+- **0 外部依赖**：外部进程用 **DSH 自身所在的 Node 运行时**（`resolveExecutable('node')` + `node -e` 内联脚本 + Node 内置 `https` 模块），不依赖系统 curl / Python / requests；Node 是 DSH 的运行基础必然存在，且自带 OpenSSL（不受本机 curl 的 TLS/schannel 问题影响）。
 - **只用 API Key（Bearer）模式**：AK/SK 签名需要 HMAC-SHA256，动态沙箱无 crypto 模块，无法实现。API Key 是火山引擎联网搜索的推荐鉴权方式。
-- 请求 JSON body 经 `stdin: { data: bodyText }` + `--data-binary @-` 传入，避免命令行转义。
+- 请求 JSON body 经 `stdin: { data: bodyText }` 传入（对应内联脚本读 stdin），避免命令行转义；API Key 经 `spawn.env` 显式条目（`VOLC_API_KEY`）传给子进程，能存活过 subprocess 的敏感变量 scrub。
+- 行为与 curl 对齐：任何 HTTP 响应（含 4xx/5xx）都写 body 到 stdout 并以 0 退出，由插件解析 JSON 判断业务错误；只有传输层错误才非 0 退出。
 - 响应是结构化 JSON（`ResponseMetadata` + `Result`），直接解析，不做文本再解析。
 - `subprocess` 是**硬依赖**（`inject: ['subprocess']`）；`ctx.web` 是**可选依赖**（`ctx.get('web')`），provider 注册失败不影响工具。
 
@@ -46,7 +47,7 @@ DeepSeek Harness Web GUI 上的**动态 Cordis 插件**：通过宿主 `ctx.subp
 | 约束 | 说明 |
 |---|---|
 | ❌ 无 JSX / TypeScript / import / require | 客户端 React 一律 `React.createElement(...)`；宿主无模块导入 |
-| ❌ `fetch` 被禁用（两端） | 本插件网络一律走 Host `ctx.subprocess` 拉起系统 curl |
+| ❌ `fetch` 被禁用（两端） | 本插件网络一律走 Host `ctx.subprocess` 拉起 DSH 自身 Node 运行时（内联 `-e` 脚本 + 内置 `https`） |
 | ❌ `setTimeout/setInterval` 被禁用 | 若需定时器用 `inject: ['timer']`（本插件暂未用到） |
 | ⚠️ 宿主可用全局 | `ctx / harness / console / btoa / atob / TextEncoder / TextDecoder`；无 `process`/`fetch`/`crypto` |
 | ⚠️ 客户端可用全局 | `styles / React / host / ctx.get('slots') / XMLHttpRequest` 等 |
@@ -81,17 +82,17 @@ DeepSeek Harness Web GUI 上的**动态 Cordis 插件**：通过宿主 `ctx.subp
 ### 5.2 核心执行 `search(query, opts)`（host.js）
 - 常量：`API_URL = 'https://open.feedcoopapi.com/search_api/web_search'`、`TRAFFIC_TAG = 'skill_web_search_common'`（与 byted-web-search 技能 CLI 的 API Key 路径一致）。
 - `buildBody`：`{Query, SearchType, Count}`；web 类型加 `NeedSummary:true`、`Filter.AuthInfoLevel`（authLevel>0）、`TimeRange`（有值才加）；`queryRewrite` 加 `QueryControl.QueryRewrite`。
-- curl argv：
+- Node 内联脚本 `NODE_SCRIPT`（`https` 模块）：
   ```
-  curl -s -S -X POST <API_URL>
-    -H Content-Type: application/json
-    -H X-Traffic-Tag: <tag>
-    -H Authorization: Bearer <apiKey>   # 仅配置了 key 时插入
-    --data-binary @-
-    --max-time 25
+  node -e <NODE_SCRIPT>          # argv: [nodeExe, '-e', NODE_SCRIPT]
+    env: { VOLC_API_KEY: <apiKey> }   # 仅配置了 key 时脚本加 Authorization: Bearer <key>
+    stdin: <bodyText>                 # 脚本读完整 stdin 作为请求 body
+    https.request(POST open.feedcoopapi.com/search_api/web_search, {timeout:25000})
+    任何 HTTP 响应 → 写 body 到 stdout 并 exit 0；传输层错误 → stderr + exit 1
   ```
   body 经 `stdio.stdin: { data: bodyText }` 传入。
-- `ctx.subprocess.spawn({ argv, cwd: '.', stdio: {stdin:{data}, stdout:{maxBytes:500000}, stderr:{maxBytes:50000}}, graceMs:30000 })`。
+- `resolveNode()`：`ctx.subprocess.resolveExecutable('node')`（PATH 解析，结果缓存）；解析失败抛「找不到 Node 运行时」。
+- `ctx.subprocess.spawn({ argv, cwd: '.', env: {VOLC_API_KEY}, stdio: {stdin:{data}, stdout:{maxBytes:500000}, stderr:{maxBytes:50000}}, graceMs:30000 })`。
 - `await handle.done` 拿 `{exitCode}`；`handle.collected.stdout.readFrom(0).text` 读输出。
 - 非零退出 → 抛错（优先 stderr）。
 - 解析 JSON：`ResponseMetadata.Error` → 抛错（invalid_api_key/10403 给引导文案）；`Result` 为空 → 抛「搜索无返回结果」。
@@ -127,7 +128,7 @@ DeepSeek Harness Web GUI 上的**动态 Cordis 插件**：通过宿主 `ctx.subp
 - `cordis_inspect_self`（无参=插件列表；`pluginId`=版本指针；`pluginId+packageId`=源码与诊断）。
 - 客户端渲染崩溃会以「Client UI ... failed while rendering Slot ...」推送，读 message 定位。
 - 常见宿主失败：`Invalid effect` = apply 返回了普通对象（见 §3）。
-- 搜索失败：先在设置页「测试搜索」看错误文案；invalid_api_key → 检查 Key；curl 网络失败 → 检查能否访问 `open.feedcoopapi.com`。
+- 搜索失败：先在设置页「测试搜索」看错误文案；invalid_api_key → 检查 Key；网络失败 → 检查能否访问 `open.feedcoopapi.com`（并确认 PATH 里有 `node`）。
 
 ### 6.3 语法自检（改完 host.js / client.js 后）
 ```powershell
@@ -157,7 +158,7 @@ node --check "$env:TEMP\c.js"
 **已知限制**：
 - 宿主配置只存内存，插件重载/进程重启后需重填。
 - 仅支持 API Key（Bearer）鉴权；AK/SK 签名模式因沙箱无 crypto 无法实现。
-- 依赖系统自带 curl（现代桌面 OS 默认有）。
+- 依赖 PATH 里的 `node`（DSH 运行在 Node 上，常规部署必然满足；极端场景若 PATH 被裁剪则 `resolveExecutable('node')` 会报错）。
 - 动态插件随 DSH 进程消失（需重新 define）。
 
 **可扩展方向**：

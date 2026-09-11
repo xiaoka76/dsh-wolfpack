@@ -123,12 +123,12 @@ return {
 | 全局 `fetch` | ❌ | 被 trap，调用即抛错 |
 | `ctx.web.fetch(url)` | ❌ | 语义是「抓取网页返回 html/text 内容」走 WebFetchProvider，不能指定 method/headers/body |
 | `ctx.web.search()` | ❌（作为手段） | 它**自己就是要注册 provider 才有**的能力，是目标不是手段 |
-| `ctx.subprocess.spawn(...)` | ✅ | 拉起外部进程（本插件用 Python CLI） |
+| `ctx.subprocess.spawn(...)` | ✅ | 拉起外部进程（推荐用 DSH 自身 Node 运行时，见 §7.2） |
 | Client 端 `XMLHttpRequest` | ✅（浏览器内） | 但模型工具 execute 跑在 Host，**Host 无法等待浏览器异步返回**，对模型工具不成立 |
 
 ### 7.2 结论
 
-动态 Host 要调外部 API，**唯一可行路径是 `subprocess` 服务拉起外部进程**（或 `shell` 服务跑命令）。这就是 volc-search-plugin 复用 byted-web-search 技能 Python CLI 的原因——而不是不想直接用接口，是沙箱里没有直连通道。
+动态 Host 要调外部 API，**唯一可行路径是 `subprocess` 服务拉起外部进程**（或 `shell` 服务跑命令）。**推荐用 DSH 自身所在的 Node 运行时**（`ctx.subprocess.resolveExecutable('node')` + `node -e <内联脚本>`，用 Node 内置 `https`/`http` 模块）——这是 volc-search-plugin 的做法：Node 是 DSH 的运行基础必然存在，自带 OpenSSL（不受本机 curl 的 TLS/schannel 问题影响），且比依赖系统 curl / Python 更干净。内联脚本运行在独立子进程里，`require/process/Buffer` 均可用（不受宿主沙箱限制）。
 
 ### 7.3 凭证传递陷阱（重要）
 
@@ -162,7 +162,7 @@ const out = handle.collected.stdout.readFrom(0).text
 
 | 想做 | 用 |
 |------|-----|
-| 调外部 API / 联网 | 优先 `ctx.subprocess` 拉起外部进程；网页抓取可用 `ctx.web.fetch` |
+| 调外部 API / 联网 | 优先 `ctx.subprocess` 拉起 **DSH 自身 Node 运行时**（`resolveExecutable('node')` + `node -e` + 内置 `https`，见 §7.2）；网页抓取可用 `ctx.web.fetch` |
 | 执行 shell 命令 | `inject: ['shell']` → `ctx.shell.run(...)` |
 | 进程管理 | `inject: ['subprocess']` → `ctx.subprocess.spawn` |
 | 读写文件 | `inject: ['fs']` → `ctx.fs.readText / writeText / editText / listDir / stat` |
