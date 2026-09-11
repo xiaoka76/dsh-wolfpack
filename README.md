@@ -9,7 +9,7 @@
 | 插件 | 说明 |
 |------|------|
 | [index-tts-plugin](./index-tts-plugin/) | **IndexTTS-2 语音朗读**：在每条 agent 回复末尾加喇叭按钮，把回复正文（text 块，不含思考/工具）用优云智算 IndexTTS-2 API 合成语音并朗读；含文本过滤、渐增分段、并发流水线、段间预载、浏览器音频缓存、音色源文件存档与过期自动续期。 |
-| [volc-search-plugin](./volc-search-plugin/) | **火山引擎（豆包）联网搜索**：复用 byted-web-search 技能 Python CLI（经宿主 `subprocess` 执行），注册模型工具 `byted_web_search` 与 `ctx.web` 搜索 Provider（id=`volcengine`），替代默认的 DeepSeek 联网搜索；含设置页（API Key / 默认参数 / 测试搜索）。 |
+| [web-search-plugin](./web-search-plugin/) | **Web 搜索（火山引擎 + Tavily）**：经宿主 `subprocess` 拉起 DSH 自身 Node 运行时直连火山引擎联网搜索 / Tavily Search API，注册模型工具 `web_search_multi` 与 `ctx.web` 搜索 Provider（优先 id=`deepseek-official`，可替换内置 `@deepseek-ai/dsh-web-search-deepseek`）；后端自动路由：火山 Key → 火山引擎、Tavily Key → Tavily、都不配 → **Tavily keyless 免费模式**（无需 Key）；含设置页（两个 API Key / 默认参数 / 测试搜索）。 |
 
 ## 快速开始
 
@@ -36,8 +36,8 @@ DSH 动态插件通过 agent 会话内的 `cordis_define` / `cordis_run` 加载�
 │   ├── client.js           code.client 源码（全部功能）
 │   ├── README.md           用户功能说明
 │   └── agents.md           插件级开发维护手册
-└── volc-search-plugin/     火山引擎（豆包）联网搜索插件
-    ├── host.js             code.host 源码（subprocess 调 CLI + 注册工具/Provider）
+└── web-search-plugin/       Web 搜索插件（火山引擎 + Tavily）
+    ├── host.js             code.host 源码（subprocess 直连双 API + 注册工具/Provider）
     ├── client.js           code.client 源码（设置页）
     ├── README.md           用户功能说明
     └── agents.md           插件级开发维护手册

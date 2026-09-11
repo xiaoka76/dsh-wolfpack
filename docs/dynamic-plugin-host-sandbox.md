@@ -1,7 +1,7 @@
 # 动态插件 Host 半部沙箱能力全解
 
 > 面向要写 `code.host` 的开发者。先读本文，再动代码。
-> 本文结论来自对 DSH 部署源码（`packages/extensions/cordis-host-runner/src/sandbox.ts` / `guard.ts`）与运行时 `Builtin.listBuiltins` 的实测核查，写于 volc-search-plugin 开发期间。
+> 本文结论来自对 DSH 部署源码（`packages/extensions/cordis-host-runner/src/sandbox.ts` / `guard.ts`）与运行时 `Builtin.listBuiltins` 的实测核查，写于 web-search-plugin（前 volc-search-plugin）开发期间。
 > 若与 DSH 升级后的行为冲突，以 `cordis_inspect_query`（Host `Builtin` / `Service`）的实时结果为准。
 
 ---
@@ -68,7 +68,7 @@
 | `harness.defineTool(definition)` | 定义**模型可见工具**，返回校验过的 ToolDefinition | — |
 | `harness.registerTool(ctx, tool)` | 把 defineTool 产物注册进工具表，agent 下轮即可调用 | — |
 
-- RPC 方向是 **Client→Host**（`host.call` 调 `harness.handle`），**没有反向 Host→Client 同步通道**（这是 volc-search-plugin 决定不在浏览器端做网络的原因之一）。
+- RPC 方向是 **Client→Host**（`host.call` 调 `harness.handle`），**没有反向 Host→Client 同步通道**（这是 web-search-plugin 决定不在浏览器端做网络的原因之一）。
 - `harness.handle` / `harness.registerTool` 的 disposer 由 runner 统一回收，插件无需手动挂 effect。
 
 ### defineTool 参数 DSL 关键约束
@@ -77,6 +77,12 @@
 - 合法类型：`string / number / integer / boolean / null / object / array / json`。
 - `output` 必填：`{ schema, render(_args, value) }`；`render` 返回内容块数组（如 `[{ type: 'text', text: value }]`）。
 - `execute` 返回 JSON 兼容值（会跨 realm 克隆）；模型看到的是 execute 的返回值，render 只影响 UI 卡片。
+
+### defineTool 能力边界（2026-09-11 实测补充）
+
+- `harness.defineTool` 是 dsh-tools `defineTool`（`packages/core/tools/src/schema.ts`）的**完整透传**（`guard.ts` 的 `sandboxDefineTool` 把 `...options` 原样传入）：`timeoutMs` / `isConcurrencySafe` / `presentCall` / `presentResult` / `output.presentationMeta` **动态插件全部支持**——静态包 `tool-web` 的注册契约（同名工具、同输出形状、同卡片 meta）可被动态插件 1:1 复刻。
+- **作用域遮蔽**：tool-web 等 preset 工具注册在 **session 作用域层**，动态插件 `harness.registerTool` 落在 **global 层**（`cordis-dynamic` 组无 scope 标签）。scoped 会 shadow global，**同层重名才抛错**。因此要让动态插件注册的同名工具（如 `web_search`）生效，必须先关闭/移除 preset 里注册同名工具的静态行（如 tool-web `search: false`）。
+- 动态 Host 沙箱**无 DOM / 无 `require`**（可用全局仅 `ctx/harness/console/btoa/atob/TextEncoder/TextDecoder`）：依赖 DOM 解析的工具逻辑（如 tool-web `fetch.ts` 的 HTML→Markdown 转换）**无法在动态插件内移植**，只能 subprocess 退化实现或固化为静态插件。
 
 参考：`packages/extensions/cordis-host-runner/src/guard.ts`；可运行示例见 `packages/extensions/cordis-host-runner/tests/helpers.ts`（REVERSE_TOOL_CODE）。
 
@@ -112,7 +118,7 @@ return {
 
 ---
 
-## 7. 网络访问路径（volc-search-plugin 的核心调研结论）
+## 7. 网络访问路径（web-search-plugin 的核心调研结论）
 
 **这是最容易误解的地方**：动态 Host 没有 `fetch`，那"调外部 API"到底走哪条路？实测结论如下。
 
@@ -128,7 +134,7 @@ return {
 
 ### 7.2 结论
 
-动态 Host 要调外部 API，**唯一可行路径是 `subprocess` 服务拉起外部进程**（或 `shell` 服务跑命令）。**推荐用 DSH 自身所在的 Node 运行时**（`ctx.subprocess.resolveExecutable('node')` + `node -e <内联脚本>`，用 Node 内置 `https`/`http` 模块）——这是 volc-search-plugin 的做法：Node 是 DSH 的运行基础必然存在，自带 OpenSSL（不受本机 curl 的 TLS/schannel 问题影响），且比依赖系统 curl / Python 更干净。内联脚本运行在独立子进程里，`require/process/Buffer` 均可用（不受宿主沙箱限制）。
+动态 Host 要调外部 API，**唯一可行路径是 `subprocess` 服务拉起外部进程**（或 `shell` 服务跑命令）。**推荐用 DSH 自身所在的 Node 运行时**（`ctx.subprocess.resolveExecutable('node')` + `node -e <内联脚本>`，用 Node 内置 `https`/`http` 模块）——这是 web-search-plugin（前 volc-search-plugin）的做法：Node 是 DSH 的运行基础必然存在，自带 OpenSSL（不受本机 curl 的 TLS/schannel 问题影响），且比依赖系统 curl / Python 更干净。内联脚本运行在独立子进程里，`require/process/Buffer` 均可用（不受宿主沙箱限制）。
 
 ### 7.3 凭证传递陷阱（重要）
 
