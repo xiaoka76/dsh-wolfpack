@@ -2,3 +2,4 @@
 # 匹配任意层级下的 CODE_REVIEW.md（含未来新增插件目录）
 **/CODE_REVIEW.md
 CODE_REVIEW.md
+.DS_Store
